@@ -7,7 +7,7 @@
 #include<arpa/inet.h>
 #include<sys/socket.h>
  
-#define SERVER "10.5.13.186"
+#define SERVER "192.168.1.11"
 #define BUFLEN 8  //Max length of buffer
 #define PORT 20000   //The port on which to send data
 #define MYFILE "file.txt"
@@ -52,18 +52,14 @@ int main(void)
             exit(1);
         }
 
-
-        bzero(buf, BUFLEN); 
+        memset(buf,'\0', BUFLEN);
          
        
         /*==================================================*/
 
-
-
-        //gets(message);
-        
         while((fs_block_sz = fread(buf, sizeof(char), BUFLEN, fs)) > 0)
         {
+            buf[BUFLEN]='\0';
             printf("isi = %s\n", buf);
             //send the message
             if (sendto(s, buf, fs_block_sz , 0 , (struct sockaddr *) &si_other, slen) == -1)
@@ -72,7 +68,7 @@ int main(void)
                 die("sendto()");
             }
 
-            bzero(buf, BUFLEN);
+            memset(buf,'\0', BUFLEN);
         }
 
         //receive a reply and print it
