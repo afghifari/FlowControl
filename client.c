@@ -7,7 +7,7 @@
 #include<arpa/inet.h>
 #include<sys/socket.h>
  
-#define SERVER "192.168.1.11"
+#define SERVER "127.0.0.1"
 #define BUFLEN 8  //Max length of buffer
 #define PORT 20000   //The port on which to send data
 #define MYFILE "file.txt"
