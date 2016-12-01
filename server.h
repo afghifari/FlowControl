@@ -30,7 +30,8 @@
 
 typedef unsigned char Byte;
 struct bufer {
- 	Byte data[BUFLEN];
+	int ackFlag;
+ 	Byte data[BUFLEN+1];
  	int dummy;
 } bufer[BUFLEN];
 

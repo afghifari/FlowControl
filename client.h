@@ -16,20 +16,20 @@
 
 #define XON (0x11) 
 #define XOFF (0x13) 
+#define ACK 6
 
 // konstanta 
 #define BYTESIZE 256
 #define MAXLEN 1024 
 #define BUFLEN 8  //Max length of buffer
 #define Endfile 26  // EOF
-#define MAXFRAME 5s
+#define MAXFRAME 4
 
-struct frame {
-	int seqNum;
-	int ackNum;
-	int flag;
+struct window {
+	int ackFlag;
 	char data[BUFLEN+1];
-} frame[MAXFRAME];
+	int dummy;
+} window[MAXFRAME];
 
 void error(const char *message);
 

@@ -28,7 +28,7 @@ void *childRProcess(void *threadid) {
         //Hanya mengonsumsi buffer jika tidak 0
         if (indexBuffer > 0) {
 
-            printf("Mengkonsumsi byte ke-%d : %s\n", counter++, bufer[front].data);
+            printf("Mengkonsumsi byte ke-%d : %s -- front : %d\n", counter++, bufer[front].data, front);
             memset(bufer[front].data,'\0', BUFLEN);
             // bzero(bufer[front].data, BUFLEN);
             front++;
@@ -110,11 +110,12 @@ int main(int argc, char *argv[]) {
         
         //print details of the client/peer and the data received
         // printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-        printf("Menerima paket ke-%d : %s\n", counter++, buf);
-        
+        printf("Menerima paket ke-%d : %s ", counter++, buf);
+
         //input data ke buffer
         if (indexBuffer < BUFLEN) {
             rear = (indexBuffer > 0) ? (rear+1) % 8 : rear;
+            printf("rear : %d\n", rear);
             memset(bufer[rear].data,'\0', BUFLEN);
             // bzero(bufer[rear].data, BUFLEN);
             for (i=0;i<BUFLEN;i++) {

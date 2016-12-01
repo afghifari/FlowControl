@@ -94,7 +94,7 @@ static Byte *q_get(QTYPE *queue, Byte *data)
  	Byte *current = NULL;
  	char b[1];
  	static int counter = 1;
-
+ 	static int frameCounter = 0;
  	// Hanya mengkonsumsi jika buffer tidak empty
  	if (queue->count > 0) {
  		current = (Byte *) malloc(sizeof(Byte));
@@ -106,6 +106,15 @@ static Byte *q_get(QTYPE *queue, Byte *data)
 
  		printf("Mengkonsumsi byte ke-%d: ", counter++);
 		switch (*current) {
+			case SOH:
+				MESGB[frameCounter].soh=1;
+				break;
+			case STX:
+				MESGB[frameCounter].stx=1;
+				break;
+			case ETX:
+				MESGB[frameCounter].etx=1;
+				break;
 			case CR:
 				printf("\'<Return>\'\n");
 				break;

@@ -15,9 +15,18 @@
 #include <netdb.h>
 #include <string.h>
 
+/*ASCII Const*/
+#define SOH 1
+#define STX 2
+#define ETX 3
+#define ENQ 5
+#define ACK 6
+#define BEL 7
 #define CR 13 // return
 #define LF 10 // line feed
+#define NAK 21
 #define Endfile 26 // EOF character
+#define ESC
 
 /* XON/XOFF protocol */ 
 #define XON (0x11) 
@@ -35,6 +44,7 @@
 #define DELAY 500
 /* Define receive buffer size */
 #define RXQSIZE 8
+#define MAXFRAME 5
 
 typedef unsigned char Byte;
 typedef struct QTYPE {
@@ -45,14 +55,14 @@ typedef struct QTYPE {
  	Byte *data;
 } QTYPE;
 
-typedef struct MESGB {
+struct MESGB {
  	unsigned int soh;
  	unsigned int stx;
  	unsigned int etx;
  	Byte checksum;
  	Byte msgno;
  	Byte *data;
-} MESGB;
+} MESGB[MAXFRAME];
 
 /* FUNCTIONS AND PROCEDURES */
 static Byte *rcvchar(int sockfd, QTYPE *queue);
