@@ -1,10 +1,10 @@
-all: client server
+all: transmitter receiver
 
-client: client.c
-	gcc -o client client.c -lpthread
+transmitter: transmitter.c
+	gcc -o transmitter transmitter.c -lpthread
 
-server: server.c
-	gcc -o server server.c -lpthread
+receiver: receiver.c
+	gcc -o receiver receiver.c -lpthread
 
 clean:
 	$(RM) transmitter receiver

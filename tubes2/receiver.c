@@ -1,191 +1,157 @@
-/* 
- *	File : receiver.c
- */ 
+/*
+    Simple udp server
+*/
+#include "receiver.h" 
 
-#include "receiver.h"
-
-Byte rxbuf[RXQSIZE];
-QTYPE rcvq = { 0, 0, 0, RXQSIZE, rxbuf };
-QTYPE *rxq = &rcvq;
-Byte status = XON;			// XON atau XOFF
+struct sockaddr_in si_me, si_other;
+int s, slen = sizeof(si_other) , recv_len;
+Byte status = XON;          // XON atau XOFF
 unsigned send_xon = 0,
 send_xoff = 0;
-int endFileReceived;
 
-/* Socket */
-int sockfd; // listen on sock_fd
-struct sockaddr_in adhost;
-struct sockaddr_in srcAddr;
-unsigned int srcLen = sizeof(srcAddr);
+static int indexBuffer = 0;
+static int front = 0;
+static int rear = 0;
 
-void error(const char *message) {
-	perror(message);
-	exit(1);
-}
-
-static Byte *rcvchar(int sockfd, QTYPE *queue)
+void die(char *s)
 {
- 	Byte* current;
- 	Byte* current2;
- 	char tempBuf[BUFMAX+1];
- 	char b[1];
- 	static int counter = 1;
-	memset(tempBuf,'\0', BUFMAX);
-
- 	current = (Byte *) malloc(sizeof(Byte));
- 	current2 = (Byte *) malloc(sizeof(Byte));
-
- 	if (recvfrom(sockfd, tempBuf, BUFMAX, 0, (struct sockaddr *) &srcAddr, &srcLen) < 0)
- 		error("ERROR: Gagal menerima karakter dari socket\n");
-
- 	tempBuf[BUFMAX+1]='\0';
- 	*current = tempBuf[0];
-	*current2 = tempBuf;
-
- 	if (*current != Endfile) {
- 		printf("Menerima byte ke-%d: ", counter++);
-		switch (*current) {
-			case CR:
-				printf("\'<Esc>\'\n");
-				break;
-			case LF:
-				printf("\'<NewLine>\'\n");
-				break;
-			case Endfile:
-				printf("\'<EOF>\'\n");
-				break;
-			default:	
-				printf("\'%s\'\n", tempBuf);
-				break;
-		}
- 	}
-
- 	// menambahkan char ke buffer dan resync queue buffer
- 	if (queue->count < 8) {
- 		queue->rear = (queue->count > 0) ? (queue->rear+1) % 8 : queue->rear;
- 		queue->data[queue->rear] = *current2;
- 		queue->count++;
- 	}
- 	
- 	// mengirim sinyal XOFF jika buffer mencapai Minimum Upperlimit
- 	if(queue->count >= (MIN_UPPERLIMIT) && status == XON) {
- 		printf("Buffer > minimum upperlimit\n");
- 		printf("Mengirim XOFF.\n");
- 		send_xoff = 1; send_xon = 0;
- 		b[0] = status = XOFF;
-
- 		if(sendto(sockfd, b, 1, 0,(struct sockaddr *) &srcAddr, srcLen) < 0)
- 			error("ERROR: Gagal mengirim XOFF.\n");
- 	}
-
- 	return current;
+    perror(s);
+    exit(1);
 }
-
-
+ 
 void *childRProcess(void *threadid) {
-	Byte *data,
-	*current = NULL;
+    static int counter = 1;
+    char b[1];
+    char message[BUFLEN];
+    char aceka[2];
+    int i;
 
- 	while (1) {
- 		current = q_get(rxq, data);
- 		sleep(2);
- 	}
+    while (1) {
 
- 	pthread_exit(NULL);
+        //Hanya mengonsumsi buffer jika tidak 0
+        if (indexBuffer > 0) {
+            memset(message,'\0', BUFLEN);
+            memset(aceka,'\0', 2);
+            aceka[0]=ACK+'0';
+            aceka[1]=bufer[front].data[BUFLEN];
+            aceka[2]='\0';
+
+            
+            for (i=0;i<BUFLEN;i++) {
+                message[i] = bufer[front].data[i];
+            }
+            message[BUFLEN]='\0';
+
+            printf("Mengkonsumsi frame ke-%d : %s\n", counter++, message);
+
+            //Mengirim ACK
+            if(sendto(s, aceka, 2, 0, (struct sockaddr *) &si_other, slen) < 0)
+                error("ERROR: Gagal mengirim ACK.\n");
+
+            memset(bufer[front].data,'\0', BUFLEN+1);
+            front++;
+            if(front == 8)
+                front=0;
+            indexBuffer--;
+        }
+
+
+        if (indexBuffer < MAX_LOWERLIMIT && status == XOFF) {
+            printf("Buffer < maximum lowerlimit\n");
+            printf("Mengirim XON\n");
+            send_xon = 1; send_xoff = 0;
+
+            b[0] = status = XON;
+            if(sendto(s, b, 1, 0, (struct sockaddr *) &si_other, slen) < 0)
+                error("ERROR: Gagal mengirim XON.\n");
+        }   
+
+        sleep(2);
+    }
+    pthread_exit(NULL);
+} 
+
+int main(int argc, char *argv[]) {
+    pthread_t thread[1];
+    int i;
+    char b[1];
+    char buf[BUFLEN+1];
+    static int counter = 1;
+
+
+    if (argc<2) {
+        // argumen pemanggilan program kurang
+        printf("Usage: %s <port>\n", argv[0]);
+        return 0;
+    }
+
+    //create a UDP socket
+    if ((s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+    {
+        die("socket");
+    }
+     
+    // zero out the structure
+    memset((char *) &si_me, 0, sizeof(si_me));
+    
+    printf("Membuat socket lokal pada port %s...\n", argv[1]); 
+    si_me.sin_family = AF_INET;
+    si_me.sin_port = htons(atoi(argv[1]));
+    si_me.sin_addr.s_addr = htonl(INADDR_ANY);
+    
+    //bind socket to port
+    if( bind(s , (struct sockaddr*)&si_me, sizeof(si_me) ) == -1)
+    {
+        die("bind");
+    }
+
+    // membuat child
+    if(pthread_create(&thread[0], NULL, childRProcess, 0)) 
+        error("ERROR: Gagal membuat proses anak");
+     
+    //keep listening for data
+    while(1)
+    {
+        fflush(stdout);
+        bzero(buf, BUFLEN+1);
+
+        //try to receive some data, this is a blocking call
+        if ((recv_len = recvfrom(s, buf, BUFLEN+1, 0, (struct sockaddr *) &si_other, &slen)) == -1)
+        {
+            die("recvfrom()");
+        }
+
+        //input data ke buffer
+        if (indexBuffer < BUFLEN) {
+            memset(bufer[rear].data,'\0', BUFLEN+1);
+            for (i=0;i<BUFLEN+1;i++) {
+                bufer[rear].data[i] = '\0';
+            }
+            strncpy(bufer[rear].data,buf,BUFLEN+1);
+            bufer[rear].data[BUFLEN+1]='\0';
+            rear++;
+            if(rear == 8)
+                rear=0;
+            indexBuffer++;
+        }
+
+        // mengirim sinyal XOFF jika buffer mencapai Minimum Upperlimit
+        if(indexBuffer >= (MIN_UPPERLIMIT) && status == XON) {
+            printf("Buffer > minimum upperlimit\n");
+            printf("Mengirim XOFF.\n");
+            send_xoff = 1; send_xon = 0;
+            b[0] = status = XOFF;
+
+            if(sendto(s, b, 1, 0,(struct sockaddr *) &si_other, slen) < 0)
+                error("ERROR: Gagal mengirim XOFF.\n");
+        }
+
+         
+    }
+    
+    printf("Data received\n");
+    printf("Now close Connections\n");
+
+    close(s);
+    return 0;
 }
-
-static Byte *q_get(QTYPE *queue, Byte *data)
-/* q_get returns a pointer to the buffer where data is read or NULL if buffer is empty. */
-{
- 	Byte *current = NULL;
- 	Byte *current2 = NULL;
- 	char b[1];
- 	static int counter = 1;
-
- 	// Hanya mengkonsumsi jika buffer tidak empty
- 	if (queue->count > 0) {
- 		current = (Byte *) malloc(sizeof(Byte));
- 		*current2 = queue->data[queue->front];
- 		*current = current[0];
-
- 		queue->front++;
- 		if (queue->front == 8) queue->front = 0;
- 		queue->count--;
-
- 		printf("Mengkonsumsi byte ke-%d: ", counter++);
-		switch (*current) {
-			case CR:
-				printf("\'<Return>\'\n");
-				break;
-			case LF:
-				printf("\'<NewLine>\'\n");
-				break;
-			case Endfile:
-				printf("\'<EOF>\'\n");
-				break;
-			default:	
-				printf("\'%s\'\n", *current2);
-				break;
-		}
- 	}
-
-
- 	if (queue->count < MAX_LOWERLIMIT && status == XOFF) {
- 		printf("Buffer < maximum lowerlimit\n");
- 		printf("Mengirim XON\n");
- 		send_xon = 1; send_xoff = 0;
-
- 		b[0] = status = XON;
- 		if(sendto(sockfd, b, 1, 0, (struct sockaddr *) &srcAddr, srcLen) < 0)
- 			error("ERROR: Gagal mengirim XON.\n");
- 	}	
-
- 	// mengembalikan byte yg dikonsumsi
- 	return current;
-}
-
-int main(int argc, char *argv[])
-{
- 	pthread_t thread[1];
-
- 	if (argc<2) {
- 		// argumen pemanggilan program kurang
- 		printf("Usage: %s <port>\n", argv[0]);
- 		return 0;
- 	}
-
- 	printf("Membuat socket lokal pada port %s...\n", argv[1]);
- 	if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
- 		printf("ERROR: Create socket gagal.\n");
-
- 	bzero((char*) &adhost, sizeof(adhost));
- 	adhost.sin_family = AF_INET;
- 	adhost.sin_port = htons(atoi(argv[1]));
- 	adhost.sin_addr.s_addr = INADDR_ANY;
-
- 	if(bind(sockfd, (struct sockaddr*) &adhost, sizeof(adhost)) < 0)
- 		error("ERROR: bind socket gagal.\n");
-
- 	endFileReceived = 0;
-
- 	memset(rxbuf, 0, sizeof(rxbuf));
- 	
- 	// membuat child
- 	if(pthread_create(&thread[0], NULL, childRProcess, 0)) 
- 		error("ERROR: Gagal membuat proses anak");
-
-	// parent process
-	Byte c;
-	while (1) {
- 		c = *(rcvchar(sockfd, rxq));
-
- 		if (c == Endfile)
- 			endFileReceived = 1;
-	}
-
-	printf("Menerima EOF!\n");
-
-	return 0;
-}
-
-

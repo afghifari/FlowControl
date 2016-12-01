@@ -1,4 +1,4 @@
-#include "transmitter.h"
+#include "Transmitter.h"
 
 
 struct hostent *SERVER;

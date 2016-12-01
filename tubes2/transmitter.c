@@ -1,143 +1,236 @@
-/* 
- *	File 	: transmitter.c 
- */
-
 #include "transmitter.h"
 
-/* NETWORKS */
-int sockfd, port;							// sock file descriptor and port number
-struct hostent *server;
-struct sockaddr_in receiverAddress;			// receiver host information
-int receiverAddrLen = sizeof(receiverAddress);
 
-/* FILE AND BUFFERS */
-FILE *myFile;			// file descriptor
-char *receiverIP;		// buffer for Host IP address
-char buf[BUFMAX+1];		// buffer for character to send
-char xbuf[2];	// buffer for receiving XON/XOFF characters
+struct hostent *SERVER;
+struct sockaddr_in si_other;
+int slen=sizeof(si_other);
+int s, i;
+char buf[BUFLEN];
+char message[BUFLEN];
+int fs_block_sz;
+char xbuf[BUFLEN];
+char aceka[2];
+int counterACK;
+
 
 /* FLAGS */
-int isXON = 1;			// flag for XON/XOFF sent
-int isSocketOpen;		// flag to indicate if connection from socket is done
+int isXON = 1;          // flag for XON/XOFF sent
+int isSocketOpen;       // flag to indicate if connection from socket is done
+int isAckReceived;
 
-void error(const char *message) {
-	perror(message);
-	exit(1);
+void die(char *s)
+{
+    perror(s);
+    exit(1);
 }
+
 
 void *childProcess(void *threadid) {
-	// Mengecek XON/XOFF
-	struct sockaddr_in srcAddr;
-	int srcLen = sizeof(srcAddr);
-	while (isSocketOpen) {
-		if (recvfrom(sockfd, xbuf, BUFMAX, 0, (struct sockaddr *) &srcAddr, &srcLen) != BUFMAX)
-			error("ERROR: ukuran buffer besar\n");
+    // Mengecek XON/XOFF dan ACK
+    while (isSocketOpen) {
+        memset(xbuf,'\0', BUFLEN);
 
-		if (xbuf[0] == XOFF) {
-			isXON = 0;
-			printf("XOFF diterima.\n");
-		} else {				// xbuf[0] == XON
-			isXON = 1;
-			printf("XON diterima.\n");
-		}
-	}
-	pthread_exit(NULL);
+        if (recvfrom(s, xbuf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen) == -1)
+            error("ERROR: ukuran buffer besar\n");  
+
+        if (xbuf[0]==ACK){
+            int num = xbuf[1] - '0';
+            window[num].ackFlag=1;
+        } else if (xbuf[0] == XOFF) {
+            isXON = 0;
+            printf("XOFF diterima.\n");
+        } else if (xbuf[0] == XON){                // xbuf[0] == XON
+            isXON = 1;
+            printf("XON diterima.\n");
+        }
+    }
+    pthread_exit(NULL);
 }
 
+ 
 int main(int argc, char *argv[]) {
-	pthread_t thread[1];
-	int lengthFrame;
-	memset(buf,'\0', BUFMAX);
-	if (argc < 4) {
-		// argumen kurang
-		printf("Usage: %s <target-ip> <port> <filename>\n", argv[0]);
-		return 0;
-	}
+    pthread_t thread[2];
+    int counter = 0;
+    int frameNum = 0;
+    int satuan;
+    int puluhan;
+    int ratusan;
 
-	if ((server = gethostbyname(argv[1])) == NULL)
-		error("ERROR: Alamat receiver salah.\n");
+    // cek argumen
+    if (argc < 4) {
+        printf("Usage: %s <target-ip> <port> <filename>\n", argv[0]);
+        return 0;
+    }
 
-	// creating IPv4 data stream socket
-	printf("Membuat socket untuk koneksi ke %s:%s ...\n", argv[1], argv[2]);
-	if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-		error("ERROR: Gagal membuat socket\n");
+    // get server
+    if ((SERVER = gethostbyname(argv[1])) == NULL)
+        error("ERROR: Alamat receiver salah.\n");
 
-	// flag=1 -> connection is established
-	isSocketOpen = 1;
+ 
+    if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+    {
+        die("socket");
+    }
+ 
+    // inisialisasi socket host
+    memset(&si_other, 0, sizeof(si_other));
+    si_other.sin_family = AF_INET;
+    bcopy((char *)SERVER->h_addr, (char *)&si_other.sin_addr.s_addr, SERVER->h_length);
+    si_other.sin_port = htons(atoi(argv[2]));
 
-	// inisialisasi socket host
-	memset(&receiverAddress, 0, sizeof(receiverAddress));
-	receiverAddress.sin_family = AF_INET;
-	bcopy((char *)server->h_addr, (char *)&receiverAddress.sin_addr.s_addr, server->h_length);
-	receiverAddress.sin_port = htons(atoi(argv[2]));
 
-	// membuka file
-	myFile = fopen(argv[argc-1], "r");
-	if (myFile == NULL) 
-		error("ERROR: File tidak ditemukan.\n");
+    FILE *fs = fopen(argv[argc-1], "r");
+    if(fs == NULL)
+    {
+        printf("ERROR: File %s not found.\n", argv[argc-1]);
+        exit(1);
+    }
+    memset(buf,'\0', BUFLEN);
 
-	if (pthread_create(&thread[0], NULL, childProcess, 0) != 0) 
-		error("ERROR: Gagal membuat thread.\n");
-	
-	// proses parent
-	// mengirimkan file (karakter isi file)
-	// connect to receiver, and read the file per character
-	int counter = 1;
-	
-	while ((lengthFrame = fread(buf, sizeof(char), BUFMAX, myFile)) > 0) {
-		buf[BUFMAX+1]='\0';
-		if (isXON) {
-			if (sendto(sockfd, buf, BUFMAX, 0, (const struct sockaddr *) &receiverAddress, receiverAddrLen) == -1)
-				error("ERROR: Buffer > minimum upper limit!\n");
-			
-			printf("Mengirim byte ke-%d ", counter++);
-			switch (buf[0]) {
-				case CR:	printf("\'<Esc>\'\n");
-							break;
-				case LF:	printf("\'<NewLine>\'\n");
-							break;
-				default:	printf("\'%s\'\n", buf);
-							break;
-			}
-		} else {
-			while (!isXON) {
-				printf("Menunggu XON...\n");
-				sleep(1);
-			}
-			if (isXON) {
-				if (sendto(sockfd, buf, BUFMAX, 0, (const struct sockaddr *) &receiverAddress, receiverAddrLen) == -1)
-					error("ERROR: Buffer > minimum upper limit!\n");
-				
-				printf("Mengirim byte ke-%d ", counter++);
-				switch (buf[0]) {
-					case CR:	printf("\'<Return>\'\n");
-								break;
-					case LF:	printf("\'<NewLine>\'\n");
-								break;
-					default:	printf("\'%s\'\n", buf);
-								break;
-				}
-			}
-		}
-		memset(buf, '\0', BUFMAX);
-		sleep(1);
-	} 
-	
-	printf("Mengirim byte ke-%d '<EOF>'\n", counter++);		// EOF
-	
-	
+    // flag=1 -> connection is established
+    isSocketOpen = 1;
+    isAckReceived = 1;
 
-	// sending endfile to receiver, marking the end of data transfer
-	buf[0] = Endfile;
-	sendto(sockfd, buf, BUFMAX, 0, (const struct sockaddr *) &receiverAddress, receiverAddrLen);
-	fclose(myFile);
-	
-	printf("Karakter selesai dikirim, menutup socket\n");
-	
-	close(sockfd);
-	isSocketOpen = 0;
-	printf("Socket ditutup!\n");
-	
-	printf("Finish!\n");
-	return 0;
+    if (pthread_create(&thread[0], NULL, childProcess, 0) != 0) 
+        error("ERROR: Gagal membuat thread 1.\n");
+
+    for (i=0;i<4;i++) {
+        window[i].ackFlag=0;
+    }
+
+
+    while((fs_block_sz = fread(buf, sizeof(char), BUFLEN, fs)) > 0)
+    {
+        buf[BUFLEN]='\0';
+
+        if (isXON) {
+            //send the message
+            memset(window[counter].data,'\0', BUFLEN+1);
+            
+            strncpy(window[counter].data, buf, BUFLEN);
+            printf("Mengirim frame ke-%d : %s\n", counter, buf);
+            window[counter].data[8] = counter + '0';
+            window[counter].data[BUFLEN+1] = '\0';
+
+
+
+            if (sendto(s, window[counter].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+            {
+                fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
+                die("sendto()");
+            }
+            
+
+            counter++;
+        } else {
+            while (!isXON) {
+                printf("Menunggu XON...\n");
+                sleep(1);
+            }
+
+            if (isXON) {
+                //send the message
+                memset(window[counter].data,'\0', BUFLEN+1);
+            
+                strncpy(window[counter].data,buf,BUFLEN);
+                printf("Mengirim frame ke-%d : %s\n", counter, buf);
+                window[counter].data[8] = counter + '0';
+                window[counter].data[BUFLEN+1] = '\0';
+
+
+                if (sendto(s, window[counter].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+                {
+                    fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
+                    die("sendto()");
+                }
+                
+                counter++;
+            }
+
+        }
+
+        // memset(buf,'\0', BUFLEN);
+        if (counter==4) {
+            printf("Menunggu Acknowledgement\n");
+            sleep(10);
+            int hit=0;
+            int cek=1;
+            while(hit<4){
+                if (window[hit].ackFlag==0)
+                    cek=0;
+                hit++;
+            }
+            if (cek==0) {
+                while(cek==0){
+                    printf("ACK tidak diterima dengan baik\n");
+                    printf("Mengirim pesan ulang..\n");
+                    hit=0;
+                    while(hit<4) {
+                        if (isXON) {
+                            if (sendto(s, window[hit].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+                            {
+                                fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
+                                die("sendto()");
+                            }
+                            printf("Mengirim frame ke-%d : %s\n", hit, window[hit].data);
+                        } else {
+                            while (!isXON) {
+                                printf("Menunggu XON...\n");
+                                sleep(1);
+                            }
+                            if (sendto(s, window[hit].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+                            {
+                                fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
+                                die("sendto()");
+                            }
+                            printf("Mengirim frame ke-%d : %s\n", hit, window[hit].data);
+                        }
+                        hit++;
+                        sleep(1);
+                    }
+                    
+                    printf("Menunggu Acknowledgement\n");
+                    sleep(10);
+                    
+                    cek=1;
+                    hit=0;
+                    while(hit<4){
+                        if (window[hit].ackFlag==0)
+                            cek=0;
+                        hit++;
+                    }
+                }
+
+            }
+
+            for (i=0;i<4;i++) {
+                window[i].ackFlag=0;
+            }
+
+            counter=0;
+        }
+        
+        sleep(1);
+    }
+
+    memset(buf,'\0', BUFLEN);
+    printf("Send EOF\n");
+    buf[0]=Endfile;
+    buf[1]='\0';
+    if (sendto(s, buf, 2 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+    {
+        fprintf(stderr, "ERROR: Failed to send EOF character\n");
+        die("sendto()");
+    }
+
+    fclose(fs);
+    
+    printf("Karakter selesai dikirim, menutup socket\n");
+    
+    isSocketOpen = 0;
+    close(s);
+    printf("Socket ditutup!\n");
+
+    printf("Finish!\n");
+    return 0;
 }
