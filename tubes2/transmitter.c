@@ -12,7 +12,6 @@ char xbuf[BUFLEN];
 char aceka[2];
 int counterACK;
 
-
 /* FLAGS */
 int isXON = 1;          // flag for XON/XOFF sent
 int isSocketOpen;       // flag to indicate if connection from socket is done
@@ -24,12 +23,10 @@ void die(char *s)
     exit(1);
 }
 
-
 void *childProcess(void *threadid) {
     // Mengecek XON/XOFF dan ACK
     while (isSocketOpen) {
         memset(xbuf,'\0', BUFLEN);
-
         if (recvfrom(s, xbuf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen) == -1)
             error("ERROR: ukuran buffer besar\n");  
 
@@ -101,20 +98,21 @@ int main(int argc, char *argv[]) {
 
     while((fs_block_sz = fread(buf, sizeof(char), BUFLEN, fs)) > 0)
     {
-        buf[BUFLEN]='\0';
+        buf[BUFLEN]='\0';   
 
         if (isXON) {
             //send the message
-            memset(window[counter].data,'\0', BUFLEN+1);
+            memset(window[counter].data,'\0', BUFLEN+1+1);
             
             strncpy(window[counter].data, buf, BUFLEN);
             printf("Mengirim frame ke-%d : %s\n", counter, buf);
             window[counter].data[8] = counter + '0';
+            window[counter].data[9] = fs_block_sz + '0';
             window[counter].data[BUFLEN+1] = '\0';
 
 
 
-            if (sendto(s, window[counter].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+            if (sendto(s, window[counter].data, fs_block_sz+1+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
             {
                 fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
                 die("sendto()");
@@ -130,15 +128,16 @@ int main(int argc, char *argv[]) {
 
             if (isXON) {
                 //send the message
-                memset(window[counter].data,'\0', BUFLEN+1);
+                memset(window[counter].data,'\0', BUFLEN+1+1);
             
                 strncpy(window[counter].data,buf,BUFLEN);
                 printf("Mengirim frame ke-%d : %s\n", counter, buf);
                 window[counter].data[8] = counter + '0';
+                window[counter].data[9] = fs_block_sz + '0';
                 window[counter].data[BUFLEN+1] = '\0';
 
 
-                if (sendto(s, window[counter].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+                if (sendto(s, window[counter].data, fs_block_sz+1+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
                 {
                     fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
                     die("sendto()");
@@ -149,13 +148,12 @@ int main(int argc, char *argv[]) {
 
         }
 
-        // memset(buf,'\0', BUFLEN);
-        if (counter==4) {
+        if (counter==MAXFRAME) {
             printf("Menunggu Acknowledgement\n");
             sleep(10);
             int hit=0;
             int cek=1;
-            while(hit<4){
+            while(hit<MAXFRAME){
                 if (window[hit].ackFlag==0)
                     cek=0;
                 hit++;
@@ -165,9 +163,9 @@ int main(int argc, char *argv[]) {
                     printf("ACK tidak diterima dengan baik\n");
                     printf("Mengirim pesan ulang..\n");
                     hit=0;
-                    while(hit<4) {
+                    while(hit<MAXFRAME) {
                         if (isXON) {
-                            if (sendto(s, window[hit].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+                            if (sendto(s, window[hit].data, fs_block_sz+1+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
                             {
                                 fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
                                 die("sendto()");
@@ -178,7 +176,7 @@ int main(int argc, char *argv[]) {
                                 printf("Menunggu XON...\n");
                                 sleep(1);
                             }
-                            if (sendto(s, window[hit].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+                            if (sendto(s, window[hit].data, fs_block_sz+1+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
                             {
                                 fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
                                 die("sendto()");
@@ -194,7 +192,7 @@ int main(int argc, char *argv[]) {
                     
                     cek=1;
                     hit=0;
-                    while(hit<4){
+                    while(hit<MAXFRAME){
                         if (window[hit].ackFlag==0)
                             cek=0;
                         hit++;
@@ -203,7 +201,7 @@ int main(int argc, char *argv[]) {
 
             }
 
-            for (i=0;i<4;i++) {
+            for (i=0;i<MAXFRAME;i++) {
                 window[i].ackFlag=0;
             }
 
@@ -212,6 +210,67 @@ int main(int argc, char *argv[]) {
         
         sleep(1);
     }
+    //sleep(10);
+    // printf("cek awal\n");
+    // // kasus khusus
+    // if (counter<MAXFRAME) {
+    //     printf("Menunggu Acknowledgement -\n");
+
+    //     sleep(10);
+    //     printf("oke\n");
+    //     int hit=0;
+    //     int cek=1;
+    //     printf("cek0\n");
+    //     while(hit<counter){
+    //         if (window[hit].ackFlag==0)
+    //             cek=0;
+    //         hit++;
+    //     }
+    //     printf("cek1\n");
+    //     if(cek==0) {
+    //         while(cek==0) {
+    //             printf("\nACK tidak diterima dengan baik\n");
+    //             printf("Mengirim pesan ulang..\n");
+    //             hit=0;
+    //             while(hit<counter) {
+    //                 if (isXON) {
+    //                     if (sendto(s, window[hit].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+    //                     {
+    //                         fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
+    //                         die("sendto()");
+    //                     }
+    //                     printf("Mengirim frame ke-%d : %s\n", hit, window[hit].data);
+    //                 } else {
+    //                     while (!isXON) {
+    //                         printf("Menunggu XON...\n");
+    //                         sleep(1);
+    //                     }
+    //                     if (sendto(s, window[hit].data, fs_block_sz+1 , 0 , (struct sockaddr *) &si_other, slen) == -1)
+    //                     {
+    //                         fprintf(stderr, "ERROR: Failed to send file %s. \n", argv[argc-1]);
+    //                         die("sendto()");
+    //                     }
+    //                     printf("Mengirim frame ke-%d : %s\n", hit, window[hit].data);
+    //                 }
+    //                 hit++;
+    //                 sleep(1);
+    //             }
+    //             printf("Menunggu Acknowledgement\n");
+    //             sleep(10);
+                
+    //             cek=1;
+    //             hit=0;
+    //             while(hit<counter){
+    //                 if (window[hit].ackFlag==0)
+    //                     cek=0;
+    //                 hit++;
+    //             }
+    //         }
+    //     }
+
+    // }
+
+
 
     memset(buf,'\0', BUFLEN);
     printf("Send EOF\n");
